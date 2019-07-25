@@ -1,0 +1,845 @@
+---
+title: "Indian Liver Disease Prediction"
+author: "Bernardo Carraro Detanico"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+### Introduction
+
+The dataset was downloaded from the UCI ML Repository:Lichman, M. (2013). UCI Machine Learning Repository [http://archive.ics.uci.edu/ml]. Irvine, CA: University of California, School of Information and Computer Science.
+
+This dataset contains 416 liver patient records and 167 non liver patient records. The data set was collected from north east of Andhra Pradesh, India.
+
+**Objective:** Identify the best model(s) for liver disease prediction in an effort to help doctors diagnosis.
+
+```{r packages}
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+library(GGally)
+library(caret)
+library(MASS)
+library(rpart)
+library(corrplot)
+library(rpart.plot)
+library(randomForest)
+library(NbClust)
+library(stats)
+library(Boruta)
+library(e1071)
+```
+
+```{r}
+setwd("~/R/Projects/1 - Liver")
+df <- read_csv("indian_liver_patient.csv")
+```
+
+### Part 1 - Exploratory Data Analysis (EDA)
+
+```{r}
+summary(df)
+
+df <- df %>%
+  filter(!is.na(Albumin_and_Globulin_Ratio)) # The Albumin_and_Globulin_Ratio had 4 NA entry, so I remove them.
+
+# unique(df$Gender) # Verify the unique values in Gender variable
+df$Gender <- as.factor(df$Gender) # Transform chr to factor
+df$Dataset <- as.factor(df$Dataset) # Transform chr to factor
+levels(df$Dataset) <- c("liver_disease", "no_liver_disease") # Rename
+df.o <- df # Original Dataframe
+```
+
+We created the AST_ALT_ratio variable, since the ratio of AST (Aspartate_Aminotransferase) to ALT (Alamine_Aminotransferase) is used as a  clinical parameter for liver disease condition.
+```{r}
+df.o <- df.o %>% # create a new variable (AST/ALT ratio)
+  mutate(AST_ALT_ratio = Aspartate_Aminotransferase/Alamine_Aminotransferase)
+df.o <- df.o[,c(1:10, 12, 11)] #change columns order
+```
+
+     
+The distribution of the original data:     
+```{r}
+ph1 <- ggplot(df.o, aes(x=Total_Bilirubin)) +
+    geom_histogram(binwidth=4, colour="black", alpha=.5)
+
+ph2 <- ggplot(df.o, aes(x=Direct_Bilirubin)) +
+    geom_histogram(binwidth=1, colour="black", alpha=.5)
+
+ph3 <- ggplot(df.o, aes(x=Alkaline_Phosphotase)) +
+    geom_histogram(binwidth=100, colour="black", alpha=.5)
+
+ph4 <- ggplot(df.o, aes(x=Alamine_Aminotransferase)) +
+    geom_histogram(binwidth=100, colour="black", alpha=.5)
+
+ph5 <- ggplot(df.o, aes(x=Aspartate_Aminotransferase)) +
+    geom_histogram(binwidth=240, colour="black", alpha=.5)
+
+ph6 <- ggplot(df.o, aes(x=Total_Protiens)) +
+    geom_histogram(binwidth=1/3, colour="black", alpha=.5)
+
+ph7 <- ggplot(df.o, aes(x=Albumin)) +
+    geom_histogram(binwidth=1/4, colour="black", alpha=.5)
+
+ph8 <- ggplot(df.o, aes(x=Albumin_and_Globulin_Ratio)) +
+    geom_histogram(binwidth=1/7, colour="black", alpha=.5)
+
+ph9 <- ggplot(df.o, aes(x=Age)) +
+    geom_histogram(binwidth=4, colour="black", alpha=.5)
+
+ph10 <- ggplot(df.o, aes(x=AST_ALT_ratio)) +
+    geom_histogram(binwidth=1/2, colour="black", alpha=.5)
+
+grid.arrange(ph1, ph2, ph3, ph4, ph5, ph6, ph7, ph8, ph9, ph10, ncol=3)
+```
+     
+The box plots of the original data:     
+```{r}
+pb1 <- ggplot(df.o, aes(Dataset, Total_Bilirubin)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb2 <- ggplot(df.o, aes(Dataset, Direct_Bilirubin)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb3 <- ggplot(df.o, aes(Dataset, Alkaline_Phosphotase)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb4 <- ggplot(df.o, aes(Dataset, Alamine_Aminotransferase)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb5 <- ggplot(df.o, aes(Dataset, Aspartate_Aminotransferase)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb6 <- ggplot(df.o, aes(Dataset, Total_Protiens)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb7 <- ggplot(df.o, aes(Dataset, Albumin)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb8 <- ggplot(df.o, aes(Dataset, Albumin_and_Globulin_Ratio)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb9 <- ggplot(df.o, aes(Dataset, Age)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb10 <- ggplot(df.o, aes(Dataset, AST_ALT_ratio)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+grid.arrange(pb1, pb2, pb3, pb4, pb5, pb6, pb7, pb8, pb9, pb10, ncol=3)
+```
+
+
+Some variables have a skewed distribution (some extreme values), so that we applied the log transformation in order to improve the data distribution.
+```{r}
+df.o.log <- df.o
+df.o.log[,c("Total_Bilirubin", "Direct_Bilirubin", "Alkaline_Phosphotase", "Alamine_Aminotransferase", "Aspartate_Aminotransferase", "Albumin_and_Globulin_Ratio", "AST_ALT_ratio")] <- lapply(df.o.log[,c("Total_Bilirubin", "Direct_Bilirubin", "Alkaline_Phosphotase", "Alamine_Aminotransferase", "Aspartate_Aminotransferase", "Albumin_and_Globulin_Ratio", "AST_ALT_ratio")], function(x) (log(x+1)))
+```
+     
+          
+The distribution of the data pos-log transformation:
+```{r}
+phh1 <- ggplot(df.o.log, aes(x=Total_Bilirubin)) +
+    geom_histogram(binwidth=1/4, fill="red", colour="black", alpha=.5)
+
+phh2 <- ggplot(df.o.log, aes(x=Direct_Bilirubin)) +
+    geom_histogram(binwidth=1/5, fill="red", colour="black", alpha=.5)
+
+phh3 <- ggplot(df.o.log, aes(x=Alkaline_Phosphotase)) +
+    geom_histogram(binwidth=1/6, fill="red", colour="black", alpha=.5)
+
+phh4 <- ggplot(df.o.log, aes(x=Alamine_Aminotransferase)) +
+    geom_histogram(binwidth=1/3, fill="red", colour="black", alpha=.5)
+
+phh5 <- ggplot(df.o.log, aes(x=Aspartate_Aminotransferase)) +
+    geom_histogram(binwidth=1/3, fill="red", colour="black", alpha=.5)
+
+phh6 <- ggplot(df.o.log, aes(x=Total_Protiens)) +
+    geom_histogram(binwidth=1/3, fill="red", colour="black", alpha=.5)
+
+phh7 <- ggplot(df.o.log, aes(x=Albumin)) +
+    geom_histogram(binwidth=1/4, fill="red", colour="black", alpha=.5)
+
+phh8 <- ggplot(df.o.log, aes(x=Albumin_and_Globulin_Ratio)) +
+    geom_histogram(binwidth=1/9, fill="red", colour="black", alpha=.5)
+
+phh9 <- ggplot(df.o.log, aes(x=Age)) +
+    geom_histogram(binwidth=7, fill="red", colour="black", alpha=.5)
+
+phh10 <- ggplot(df.o.log, aes(x=AST_ALT_ratio)) +
+    geom_histogram(binwidth=1/7, fill="red", colour="black", alpha=.5)
+
+grid.arrange(phh1, phh2, phh3, phh4, phh5, phh6, phh7, phh8, phh9, phh10, ncol=3)
+```
+
+Alternatively, we decided to perform another transformation in order to tackle with extreme values, which could bias the statistic inferences and the predict models. For this, we used the boxplot.stats function and the rule that a data point is an outlier/extreme value if it is more than 1.5 * IQR (interquartile range) above the third quartile or below the first quartile.
+```{r}
+out1 <- sort.int(boxplot.stats(df.o$Total_Bilirubin)$out)
+out2 <- sort.int(boxplot.stats(df.o$Direct_Bilirubin)$out)
+out3 <- sort.int(boxplot.stats(df.o$Alkaline_Phosphotase)$out)
+out4 <- sort.int(boxplot.stats(df.o$Alamine_Aminotransferase)$out)
+out5 <- sort.int(boxplot.stats(df.o$Aspartate_Aminotransferase)$out)
+out6 <- sort.int(boxplot.stats(df.o$Total_Protiens)$out)
+out7 <- sort.int(boxplot.stats(df.o$Albumin)$out)
+out8 <- sort.int(boxplot.stats(df.o$Albumin_and_Globulin_Ratio)$out)
+out9 <- sort.int(boxplot.stats(df.o$Age)$out)
+out10 <- sort.int(boxplot.stats(df.o$AST_ALT_ratio)$out)
+
+df.o.wo <- df.o %>%
+    mutate(Total_Bilirubin = replace(Total_Bilirubin, Total_Bilirubin >= 5.5, 5.3),
+          Direct_Bilirubin = replace(Direct_Bilirubin, Direct_Bilirubin >= 3, 2.8),
+          Alkaline_Phosphotase = replace(Alkaline_Phosphotase, Alkaline_Phosphotase >= 482, 480),
+          Alamine_Aminotransferase = replace(Alamine_Aminotransferase, Alamine_Aminotransferase >= 119, 118),
+          Aspartate_Aminotransferase = replace(Aspartate_Aminotransferase, Aspartate_Aminotransferase >= 181, 180),
+          Total_Protiens = replace(Total_Protiens, Total_Protiens >= 9.5, 9.2),
+          Total_Protiens = replace(Total_Protiens, Total_Protiens <= 3.6, 3.7),
+          Albumin_and_Globulin_Ratio = replace(Albumin_and_Globulin_Ratio, Albumin_and_Globulin_Ratio >= 1.72, 1.7),
+          AST_ALT_ratio = replace(AST_ALT_ratio, AST_ALT_ratio >= 3.1, 3))
+```
+
+The box plots of the data after dealing with the extreme values:
+```{r}
+pb1 <- ggplot(df.o.wo, aes(Dataset, Total_Bilirubin)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb2 <- ggplot(df.o.wo, aes(Dataset, Direct_Bilirubin)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb3 <- ggplot(df.o.wo, aes(Dataset, Alkaline_Phosphotase)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb4 <- ggplot(df.o.wo, aes(Dataset, Alamine_Aminotransferase)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb5 <- ggplot(df.o.wo, aes(Dataset, Aspartate_Aminotransferase)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb6 <- ggplot(df.o.wo, aes(Dataset, Total_Protiens)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb7 <- ggplot(df.o.wo, aes(Dataset, Albumin)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb8 <- ggplot(df.o.wo, aes(Dataset, Albumin_and_Globulin_Ratio)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb9 <- ggplot(df.o.wo, aes(Dataset, Age)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+pb10 <- ggplot(df.o.wo, aes(Dataset, AST_ALT_ratio)) + geom_boxplot(aes(fill = Dataset), alpha = 2/3) + stat_summary(fun.y=mean, geom="point", shape=3, size=4) + theme(legend.position = "none")
+
+grid.arrange(pb1, pb2, pb3, pb4, pb5, pb6, pb7, pb8, pb9, pb10, ncol=3)
+```
+
+Additionally, we decided to perform the categorization of each column through the clustering approach in order to improve the statistic inferences and the predict models.
+
+For this cluster analysis, we used the NbClust R package, which provides 30 indices for determining the best number of clusters with the Euclidean distance. The method of data clustering was hierarchical clustering with average linkage.
+```{r}
+df.cat <- df.o.wo
+
+d3 <- dist(df.cat[, 3])
+d4 <- dist(df.cat[, 4])
+d5 <- dist(df.cat[, 5])
+d6 <- dist(df.cat[, 6])
+d7 <- dist(df.cat[, 7])
+d8 <- dist(df.cat[, 8])
+d9 <- dist(df.cat[, 9])
+d10 <- dist(df.cat[, 10])
+d11 <- dist(df.cat[, 11])
+
+nc3 <- NbClust(scale(df.cat[, 3]), distance="euclidean", min.nc=2, max.nc=15, method="average") #5
+nc4 <- NbClust(scale(df.cat[, 4]), distance="euclidean", min.nc=2, max.nc=15, method="average") #5
+nc5 <- NbClust(scale(df.cat[, 5]), distance="euclidean", min.nc=2, max.nc=15, method="average") #8
+nc6 <- NbClust(scale(df.cat[, 6]), distance="euclidean", min.nc=2, max.nc=15, method="average") #8
+nc7 <- NbClust(scale(df.cat[, 7]), distance="euclidean", min.nc=2, max.nc=15, method="average") #5
+nc8 <- NbClust(scale(df.cat[, 8]), distance="euclidean", min.nc=2, max.nc=15, method="average") #4
+nc9 <- NbClust(scale(df.cat[, 9]), distance="euclidean", min.nc=2, max.nc=15, method="average") #15
+nc10 <- NbClust(scale(df.cat[, 10]), distance="euclidean", min.nc=2, max.nc=15, method="average") #3
+nc11 <- NbClust(scale(df.cat[, 11]), distance="euclidean", min.nc=2, max.nc=15, method="average") #3
+
+fit3 <- hclust(d3, method="average")
+fit4 <- hclust(d4, method="average")
+fit5 <- hclust(d5, method="average")
+fit6 <- hclust(d6, method="average")
+fit7 <- hclust(d7, method="average")
+fit8 <- hclust(d8, method="average")
+fit9 <- hclust(d9, method="average")
+fit10 <- hclust(d10, method="average")
+fit11 <- hclust(d11, method="average")
+
+c3 <- cutree(fit3, k=5)
+c4 <- cutree(fit4, k=5)
+c5 <- cutree(fit5, k=8)
+c6 <- cutree(fit6, k=8)
+c7 <- cutree(fit7, k=5)
+c8 <- cutree(fit8, k=4)
+c9 <- cutree(fit9, k=15)
+c10 <- cutree(fit10, k=3)
+c11 <- cutree(fit11, k=3)
+
+df.catfinal <- cbind(df.cat, c3, c4, c5, c6, c7, c8, c9, c10, c11)
+df.catfinal2 <- subset(df.catfinal, select = c("Age", "Gender", "Total_Bilirubin", "c3", "Direct_Bilirubin", "c4", "Alkaline_Phosphotase", "c5", "Alamine_Aminotransferase", "c6", "Aspartate_Aminotransferase", "c7", "Total_Protiens", "c8", "Albumin", "c9", "Albumin_and_Globulin_Ratio", "c10", "AST_ALT_ratio", "c11","Dataset"))
+
+df.catfinal2 <- df.catfinal2 %>%
+  dplyr::rename(Total_Bilirubin_ = c3, Direct_Bilirubin_ = c4, Alkaline_Phosphotase_ = c5, Alamine_Aminotransferase_ = c6, Aspartate_Aminotransferase_ = c7, Total_Protiens_ = c8, Albumin_ = c9, Albumin_and_Globulin_Ratio_ = c10, AST_ALT_ratio_ = c11)
+
+df.cat.f <- subset(df.catfinal2, select = c("Age", "Gender", "Total_Bilirubin_", "Direct_Bilirubin_", "Alkaline_Phosphotase_", "Alamine_Aminotransferase_", "Aspartate_Aminotransferase_", "Total_Protiens_", "Albumin_", "Albumin_and_Globulin_Ratio_", "AST_ALT_ratio_", "Dataset"))
+
+df.cat.f$Total_Bilirubin_ <- as.factor(df.cat.f$Total_Bilirubin_)
+df.cat.f$Direct_Bilirubin_ <- as.factor(df.cat.f$Direct_Bilirubin_)
+df.cat.f$Alkaline_Phosphotase_ <- as.factor(df.cat.f$Alkaline_Phosphotase_)
+df.cat.f$Alamine_Aminotransferase_ <- as.factor(df.cat.f$Alamine_Aminotransferase_)
+df.cat.f$Aspartate_Aminotransferase_ <- as.factor(df.cat.f$Aspartate_Aminotransferase_)
+df.cat.f$Total_Protiens_ <- as.factor(df.cat.f$Total_Protiens_)
+df.cat.f$Albumin_ <- as.factor(df.cat.f$Albumin_)
+df.cat.f$Albumin_and_Globulin_Ratio_ <- as.factor(df.cat.f$Albumin_and_Globulin_Ratio_)
+df.cat.f$AST_ALT_ratio_ <- as.factor(df.cat.f$AST_ALT_ratio_)
+```
+
+    
+The plots after data categorization:      
+```{r}
+p1 <- ggplot(df.cat.f, aes(x=Total_Bilirubin_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p2 <- ggplot(df.cat.f, aes(x=Direct_Bilirubin_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p3 <- ggplot(df.cat.f, aes(x=Alkaline_Phosphotase_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p4 <- ggplot(df.cat.f, aes(x=Alamine_Aminotransferase_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p5 <- ggplot(df.cat.f, aes(x=Aspartate_Aminotransferase_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p6 <- ggplot(df.cat.f, aes(x=Total_Protiens_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p7 <- ggplot(df.cat.f, aes(x=Albumin_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p8 <- ggplot(df.cat.f, aes(x=Albumin_and_Globulin_Ratio_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+p9 <- ggplot(df.cat.f, aes(x=AST_ALT_ratio_)) + 
+    geom_bar(aes(fill=Dataset)) +
+    scale_fill_brewer(palette = "Set2")
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, p9, ncol=2)
+```
+
+                  
+**After all these procedures, we had the following 4 dataframes:**
+
+-> ORIGINAL DATAFRAME : df.o    
+-> ORIGINAL DATAFRAME with LOG TRANSFORMATION: df.o.log    
+-> ORIGINAL DATAFRAME with EXTREME VALUES FITTED: df.o.wo    
+-> ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING: df.cat.f    
+
+    
+Correlations between continuous variables (original dataframe):
+```{r}
+ggcorr(subset(df.o, select = -c(Gender, Dataset)), palette = "RdBu", label = TRUE, label_round = 3, color = "grey30",  hjust = 0.85)
+```
+
+```{r}
+cols <- c("#00AFBB", "#E7B800")  
+pairs(df.o[,1:11], pch = 19,  cex = 0.4,
+      col = cols[df.o$Dataset],
+      lower.panel=NULL,
+      cex.labels = 0.4)
+```
+
+In this case we used only the original dataframe, since the others showed similar results.    
+    
+Some variables are strong directly correlated:    
+-> Total Bilirubin x Direct Bilirubin: 0.874    
+-> Alamine Aminotransferase x Aspartate Aminotransferease: 0.792    
+-> Total Protiens x Albumin: 0.783
+
+
+### Part 2 - Statistical Inferences
+
+Some variables have a skewed distribution (not normal). Many of statistical tests require the data to follow a normal distribution (parametric tests). Before using a statistical test, we plotted the Q-Q plot and Shapiro-Wilk’s method (shapiro.test()) to make sure that the test assumptions were met. The data do *not present a normal distribution*, thus we applied non-paramatric tests.
+
+In order to compare the two groups (liver disease and no liver disease - two independent groups of samples) and several variables not normally distributed, we chose the unpaired two-samples Wilcoxon test (also known as Mann-Whitney test). Using the Mann-Whitney-Wilcoxon Test, we can decide whether the population distributions are identical without assuming them to follow the normal distribution.
+
+We tested 3 dataframes (original, original log transformed and original with extreme values fitted) through the Mann-Whitney-Wilcoxon Test.
+```{r}
+# df.o
+wilcox.tests.o <- lapply(df.o[,c("Total_Bilirubin", "Direct_Bilirubin", "Alkaline_Phosphotase", "Alamine_Aminotransferase", "Aspartate_Aminotransferase", "Total_Protiens", "Albumin", "Albumin_and_Globulin_Ratio", "Age", "AST_ALT_ratio")], function(x) wilcox.test(x ~ df.o$Dataset)$p.value)
+
+#df.o.log
+wilcox.tests.o.log <- lapply(df.o.log[,c("Total_Bilirubin", "Direct_Bilirubin", "Alkaline_Phosphotase", "Alamine_Aminotransferase", "Aspartate_Aminotransferase", "Total_Protiens", "Albumin", "Albumin_and_Globulin_Ratio", "Age", "AST_ALT_ratio")], function(x) wilcox.test(x ~ df.o.log$Dataset)$p.value)
+
+#df.o.wo
+wilcox.tests.o.wo <- lapply(df.o.wo[,c("Total_Bilirubin", "Direct_Bilirubin", "Alkaline_Phosphotase", "Alamine_Aminotransferase", "Aspartate_Aminotransferase", "Total_Protiens", "Albumin", "Albumin_and_Globulin_Ratio", "Age", "AST_ALT_ratio")], function(x) wilcox.test(x ~ df.o.wo$Dataset)$p.value)
+
+results_wilcox <- cbind(wilcox.tests.o, wilcox.tests.o.log, wilcox.tests.o.wo)
+results_wilcox
+```
+The results were similar for the 3 dataframes (original, log transformed and original with extreme values fitted).    
+    
+The following variables (8/10) showed significant difference between groups liver_disease and no_liver_disease:
+
+-> Total_Bilirubin (e.g. The p-value is 2.748439e-13, which is less than 0.05. Hence, we reject the null hypothesis. There are significant differences in the median of Total_Bilirubin lab test for liver_disease and no_liver_disease groups. In other words, the distribution of Total_Bilirubin variable in liver_disease and no_liver_disease groups is not identical).    
+-> Direct_Bilirubin   
+-> Alkaline_Phosphotase   
+-> Alamine_Aminotransferase   
+-> Aspartate_Aminotransferase    
+-> ~~Total_Protein~~   
+-> Albumin   
+-> Albumin_and_Globulin_Ratio   
+-> Age     
+-> ~~AST_ALT_ratio~~
+
+After that, we got the original dataframe with categorization (df.cat.f) and compared categorical variables through the chi-square test of independence (used to analyze the frequency table). The chi-squared test is a statistical test used to discover whether there is a relationship between categorical variables.
+
+```{r}
+chisq.tests <- lapply(df.cat.f[,c("Gender", "Total_Bilirubin_", "Direct_Bilirubin_", "Alkaline_Phosphotase_", "Alamine_Aminotransferase_", "Aspartate_Aminotransferase_", "Total_Protiens_", "Albumin_", "Albumin_and_Globulin_Ratio_", "AST_ALT_ratio_")], function(x) chisq.test(xtabs(~ Dataset + x, df.cat.f))$p.value)
+chisq.tests
+```
+
+The following variables (7/10) showed significant difference between groups liver_disease and no_liver_disease:
+
+-> Total_Bilirubin (e.g. The p-value is 4.65473e-12, which is less than 0.05. Hence, we reject the null hypothesis. The Total_Bilirubin and Dataset (liver_disease and no_liver_disease) variables are dependent (variables are statistically significantly associated. There is a relationship between them).    
+-> Direct_Bilirubin    
+-> Alkaline_Phosphotase        
+-> Alamine_Aminotransferase         
+-> Aspartate_Aminotransferase       
+-> ~~Total_Protein~~     
+-> Albumin     
+-> Albumin_and_Globulin_Ratio    
+-> ~~Gender~~     
+-> ~~AST_ALT_ratio~~
+     
+The standardized residuals is also important to interpret the association between rows and columns.
+```{r}
+chisq.tests.ind <- chisq.test(xtabs(~ Dataset + Total_Bilirubin_, df.cat.f))
+chisq.tests.ind$residuals
+```
+
+```{r}
+corrplot(chisq.tests.ind$residuals, is.cor = FALSE, method="number",  cl.pos = "n")
+```
+
+For example, the residuals of chi-squared test between Dataset (liver_disease and no_liver_disease) and Total Bilirubin shows attraction (positive association) and repulsion (negative association). The group 1 (lower values of Total_Bilirubin), for example, shows a positive association with no_liver_disease and a negative association with liver_disease.
+       
+      
+### Part 3 - Features Selection
+
+We used some previous results and some procedures to perform the feature (variable) selection in order to improve the performance of machine learning models.
+
+a) The results from correlation were:     
+-> Total Bilirubin x Direct Bilirubin: + 0.874      
+-> Alamine Aminotransferase x Aspartate Aminotransferease: + 0.792     
+-> Total Protiens x Albumin: + 0.783      
+
+b) The results from statistical analysis showed that the variables Total Protiens, Gender and AST_ALT_ratio are not significantly different between no_liver_disease and liver_disease groups.
+
+c) Boruta: It is a feature ranking and selection algorithm based on random forests. It clearly decides if a variable is important or not.
+```{r}
+set.seed(123)
+boruta_output <- Boruta(Dataset ~ ., data=df.o, doTrace=0) 
+boruta_output$finalDecision
+plot(boruta_output, cex.axis=.7, las=2, xlab="", main="Variable Importance")
+
+set.seed(123)
+boruta_output <- Boruta(Dataset ~ ., data=df.o.wo, doTrace=0) 
+boruta_output$finalDecision
+plot(boruta_output, cex.axis=.7, las=2, xlab="", main="Variable Importance")
+
+set.seed(123)
+boruta_output <- Boruta(Dataset ~ ., data=df.cat.f, doTrace=0) 
+boruta_output$finalDecision
+plot(boruta_output, cex.axis=.7, las=2, xlab="", main="Variable Importance")
+```
+
+d) Variable Importance Through Random Forest: Random forests are based on decision trees and use bagging to come up with a model over the data.
+```{r}
+set.seed(123)
+fit=randomForest(Dataset~., data=df.o)
+varImp(fit)
+
+set.seed(123)
+fit=randomForest(Dataset~., data=df.o.wo)
+varImp(fit)
+
+set.seed(123)
+fit=randomForest(Dataset~., data=df.cat.f)
+varImp(fit)
+```
+
+e) Using Regression to Calculate Variable Importance: The summary function in regression also describes features and how they affect the dependent feature through significance.
+```{r}
+set.seed(123)
+model.lr <- glm(Dataset ~ ., data = df.o, family = binomial(link='logit'))
+summary(model.lr)
+```
+
+After that, we chose the following variables as essential for the machine learning models: Alkaline_Phosphotase, Alamine_Aminotransferase and Age. Other variables were applied in order to improve the performance. The variable Gender is a non essential variable and was not used.
+
+
+### Part 4 - Modeling and Predictions
+
+To develop a model to predict liver disease and no liver disease based on patient records, we tried the following 3 dataset and 4 machine learning models:
+
+-> ORIGINAL DATAFRAME: df.o     
+-> ORIGINAL DATAFRAME with EXTREME VALUES FITTED: df.o.wo    
+-> ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING: df.cat.f 
+
+
+```{r}
+# Relevels:
+df.o$Dataset <- relevel(df.o$Dataset, "no_liver_disease")
+df.o.wo$Dataset <- relevel(df.o.wo$Dataset, "no_liver_disease")
+df.cat.f$Dataset <- relevel(df.cat.f$Dataset, "no_liver_disease")
+```
+
+
+#### 1. Logistic Regression:
+     
+ORIGINAL DATAFRAME:
+```{r}
+# df.o
+set.seed(123)
+training.samples <- df.o$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o[ training.samples,]
+df.Test  <- df.o[-training.samples,]
+
+# Model
+set.seed(123)
+model.lr.o <- glm(Dataset ~ Total_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Total_Protiens + Albumin + Age, data = df.Train, family = binomial(link='logit'))
+summary(model.lr.o)
+```
+It can be seen that only 4 out of the 6 predictors are significantly associated to the outcome - liver_disease. These include: Total_Bilirubin, Alamine_Aminotransferase and Albumin.
+
+The logistic regression coefficients give the change in the log odds of the outcome for a single unit increase in the predictor variable.
+
+The coefficient estimate of the variable Alamine_Aminotransferase is b = 0.0141188, which is positive. This means that an increase in Alamine Aminotransferase lab test is associated with increase in the probability of having liver disease. This indicates that one unit increase in the Alamine_Aminotransferase unit will increase the odds of having liver disease by exp(0.0141188) 1.014219 times.
+
+However the coefficient for the variable Albumin is b = 0.7214425, which is negative. This means that an increase in Albumin lab test will be associated with a decreased probability of having liver disease.
+
+```{r}
+# Prediction
+probabilities <- model.lr.o %>% predict(df.Test, type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, "liver_disease", "no_liver_disease")
+matrix.lr.o <- confusionMatrix(relevel(as.factor(predicted.classes), "no_liver_disease"), df.Test$Dataset)
+matrix.lr.o
+```
+
+    
+ORIGINAL DATAFRAME with EXTREME VALUES FITTED:
+```{r}
+# df.o.wo
+set.seed(123)
+training.samples <- df.o.wo$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o.wo[ training.samples,]
+df.Test  <- df.o.wo[-training.samples,]
+
+# Model
+set.seed(123)
+model.lr.o.wo <- glm(Dataset ~ Total_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Total_Protiens + Albumin + Age, data = df.Train, family = binomial(link='logit'))
+summary(model.lr.o.wo)
+
+# Prediction
+probabilities <- model.lr.o.wo %>% predict(df.Test, type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, "liver_disease", "no_liver_disease")
+matrix.lr.o.wo <- confusionMatrix(relevel(as.factor(predicted.classes), "no_liver_disease"), df.Test$Dataset)
+matrix.lr.o.wo
+```
+
+ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING:
+```{r}
+# df.cat.f
+set.seed(123)
+training.samples <- df.cat.f$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.cat.f[ training.samples,]
+df.Test  <- df.cat.f[-training.samples,]
+
+# Model
+set.seed(123)
+model.lr.cat.f <- glm(Dataset ~ Total_Bilirubin_ + Alkaline_Phosphotase_ + Alamine_Aminotransferase_ + Total_Protiens_ + Albumin_ + AST_ALT_ratio_ + Age, data = df.Train, family = binomial(link='logit'))
+summary(model.lr.cat.f)
+
+# Prediction
+probabilities <- model.lr.cat.f %>% predict(df.Test, type = "response")
+predicted.classes <- ifelse(probabilities > 0.5, "liver_disease", "no_liver_disease")
+matrix.lr.cat.f <- confusionMatrix(relevel(as.factor(predicted.classes), "no_liver_disease"), df.Test$Dataset)
+matrix.lr.cat.f
+```
+
+This model performed better with the ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING - The overall accuracy was 77,39%. The accuracy represents the correct classification of patients with and without the condition (prediction x reference).
+
+#### 2. KNN (K-Nearest Neighbors):
+     
+ORIGINAL DATAFRAME:
+```{r}
+# df.o
+set.seed(123)
+training.samples <- df.o$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o[ training.samples,]
+df.Test  <- df.o[-training.samples,]
+
+# Model
+set.seed(123)
+model.knn.o <- train(
+  Dataset ~ Total_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Total_Protiens + Albumin + Age, data = df.Train, method = "knn",
+  trControl = trainControl("cv", number = 10),
+  preProcess = c("center","scale"), #no for categoric
+  tuneLength = 20
+  )
+plot(model.knn.o)
+
+# Prediction
+predicted.classes <- model.knn.o %>% predict(df.Test)
+matrix.knn.o <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.knn.o
+```
+
+ORIGINAL DATAFRAME with EXTREME VALUES FITTED:
+```{r}
+# df.o.wo
+set.seed(123)
+training.samples <- df.o.wo$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o.wo[ training.samples,]
+df.Test  <- df.o.wo[-training.samples,]
+
+# Model
+set.seed(123)
+model.knn.o.wo <- train(
+  Dataset ~ Total_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Total_Protiens + Age, data = df.Train, method = "knn",
+  trControl = trainControl("cv", number = 10),
+  preProcess = c("center","scale"), #no for categoric
+  tuneLength = 20
+  )
+plot(model.knn.o.wo)
+
+# Prediction
+predicted.classes <- model.knn.o.wo %>% predict(df.Test)
+matrix.knn.o.wo <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.knn.o.wo
+```
+
+ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING:
+```{r}
+# df.cat.f
+set.seed(123)
+training.samples <- df.cat.f$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.cat.f[ training.samples,]
+df.Test  <- df.cat.f[-training.samples,]
+
+# Model
+set.seed(123)
+model.knn.cat.f <- train(
+  Dataset ~ Direct_Bilirubin_ + Alkaline_Phosphotase_ + Alamine_Aminotransferase_ + Albumin_ + AST_ALT_ratio_ + Age, data = df.Train, method = "knn",
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 20
+  )
+plot(model.knn.cat.f)
+
+# Prediction
+predicted.classes <- model.knn.cat.f %>% predict(df.Test)
+matrix.knn.cat.f <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.knn.cat.f
+```
+
+This model performed better with the ORIGINAL DATAFRAME - The overall accuracy was 71.30%.
+
+#### 3. Classification and Regression Trees (CART):
+     
+ORIGINAL DATAFRAME:
+```{r}
+# df.o
+set.seed(123)
+training.samples <- df.o$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o[ training.samples,]
+df.Test  <- df.o[-training.samples,]
+
+# Model
+set.seed(123)
+model.tree.o <- rpart(
+  Dataset ~ Direct_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Age, data = df.Train, method = "class"
+  )
+rpart.plot(model.tree.o, cex = NULL, tweak = 1, extra=108)
+printcp(model.tree.o)
+
+# Prediction
+predicted.classes <- model.tree.o %>% predict(df.Test, type = "class")
+matrix.tree.o <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.tree.o
+```
+
+
+ORIGINAL DATAFRAME with EXTREME VALUES FITTED:
+```{r}
+# df.o.wo
+set.seed(123)
+training.samples <- df.o.wo$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o.wo[ training.samples,]
+df.Test  <- df.o.wo[-training.samples,]
+
+# Model
+set.seed(123)
+model.tree.o.wo <- rpart(
+  Dataset ~ Direct_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Age, data = df.Train, method = "class"
+  )
+rpart.plot(model.tree.o.wo, cex = NULL, tweak = 1, extra=108)
+printcp(model.tree.o.wo)
+
+# Prediction
+predicted.classes <- model.tree.o.wo %>% predict(df.Test, type = "class")
+matrix.tree.o.wo <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.tree.o.wo
+
+```
+
+ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING:
+```{r}
+# df.cat.f
+set.seed(123)
+training.samples <- df.cat.f$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.cat.f[ training.samples,]
+df.Test  <- df.cat.f[-training.samples,]
+
+# Model
+set.seed(123)
+model.tree.cat.f <- rpart(
+  Dataset ~ Alkaline_Phosphotase_ + Alamine_Aminotransferase_ + Albumin_ + Age, data = df.Train, method = "class"
+  )
+printcp(model.tree.cat.f)
+rpart.plot(model.tree.cat.f, cex = NULL, tweak = 1, extra=108)
+
+# Prediction
+predicted.classes <- model.tree.cat.f %>% predict(df.Test, type = "class")
+matrix.tree.cat.f <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.tree.cat.f
+
+```
+
+This model performed better with the ORIGINAL DATAFRAME - The overall accuracy was 68.70%.
+
+#### 4. Random Forest:
+     
+ORIGINAL DATAFRAME:
+```{r}
+# df.o
+set.seed(123)
+training.samples <- df.o$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o[ training.samples,]
+df.Test  <- df.o[-training.samples,]
+
+# Model
+set.seed(123)
+model.rf.o <- train(
+  Dataset ~ Direct_Bilirubin + Total_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Albumin + Age + Aspartate_Aminotransferase + Albumin_and_Globulin_Ratio, data = df.Train, method = "rf",
+  trControl = trainControl("cv", number = 10),
+  importance = FALSE
+  )
+model.rf.o$finalModel
+
+# Plot MeanDecreaseGini
+varImpPlot(model.rf.o$finalModel, type = 2)
+varImp(model.rf.o)
+```
+The results show that across all of the trees considered in the random forest, the Alkaline_Phosphotase, Age and Alamine_Aminotransferase variables are the three most important variables.
+     
+```{r}
+# Prediction
+predicted.classes <- model.rf.o %>% predict(df.Test)
+matrix.rf.o <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.rf.o
+```
+
+
+ORIGINAL DATAFRAME with EXTREME VALUES FITTED:
+```{r}
+# df.o.wo
+set.seed(123)
+training.samples <- df.o.wo$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.o.wo[ training.samples,]
+df.Test  <- df.o.wo[-training.samples,]
+
+# Model
+set.seed(123)
+model.rf.o.wo <- train(
+  Dataset ~ Total_Bilirubin + Alkaline_Phosphotase + Alamine_Aminotransferase + Albumin + Aspartate_Aminotransferase + Albumin_and_Globulin_Ratio + Age, data = df.Train, method = "rf",
+  trControl = trainControl("cv", number = 10),
+  importance = FALSE
+  )
+model.rf.o.wo$finalModel
+
+# Variable Importance
+varImp(model.rf.o.wo)
+# Plot MeanDecreaseGini
+varImpPlot(model.rf.o.wo$finalModel, type = 2)
+
+# Prediction
+predicted.classes <- model.rf.o.wo %>% predict(df.Test)
+matrix.rf.o.wo <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.rf.o.wo
+```
+
+
+ORIGINAL DATAFRAME CATEGORIZATED BY CLUSTERING:
+```{r}
+# df.cat.f
+set.seed(123)
+training.samples <- df.cat.f$Dataset %>% 
+    createDataPartition(p = 0.8, list = FALSE)
+df.Train <- df.cat.f[ training.samples,]
+df.Test  <- df.cat.f[-training.samples,]
+
+# Model
+set.seed(123)
+model.rf.cat.f <- train(
+  Dataset ~ Direct_Bilirubin_ + Alkaline_Phosphotase_ + Alamine_Aminotransferase_ + Age + Albumin_, data = df.Train, method = "rf",
+  trControl = trainControl("cv", number = 10),
+  importance = FALSE
+  )
+model.rf.cat.f$finalModel
+
+# Variable Importance
+varImp(model.rf.cat.f)
+# Plot MeanDecreaseGini
+varImpPlot(model.rf.cat.f$finalModel, type = 2)
+
+
+# Prediction
+predicted.classes <- model.rf.cat.f %>% predict(df.Test)
+matrix.rf.cat.f <- confusionMatrix(predicted.classes, df.Test$Dataset)
+matrix.rf.cat.f
+```
+
+This model performed better with the ORIGINAL DATAFRAME - The overall accuracy was 73.91%.
+
+---
+### Summary
+
+```{r}
+
+x <- data.frame("MLA" = c("Log. Regression", "Log. Regression", "Log. Regression", "KNN", "KNN", "KNN", "CART", "CART", "CART", "Random Forest", "Random Forest", "Random Forest"),
+                "Dataframe" = c("ORIGINAL", "ORIGINAL VALUES FITTED", "ORIGINAL CATEGORIZATED", "ORIGINAL", "ORIGINAL VALUES FITTED", "ORIGINAL CATEGORIZATED", "ORIGINAL", "ORIGINAL VALUES FITTED", "ORIGINAL CATEGORIZATED", "ORIGINAL", "ORIGINAL VALUES FITTED", "ORIGINAL CATEGORIZATED"),
+                "Accuracy" = c(0.7565, 0.7391, 0.7739, 0.713, 0.6522, 0.6957, 0.687, 0.6435, 0.6435, 0.7391, 0.7304, 0.7217),
+                "Number of Predictors" = c("6 of 11", "6 of 11", "7 of 11", "6 of 11", "5 of 11", "6 of 11", "4 of 11", "4 of 11", "4 of 11", "8 of 11", "7 of 11", "5 of 11"))
+x
+```
+
+Considering this dataset with few observations and some extreme values, the  Logistic Regression model performed better: accuracy value of 77.39% with 7 of 11 predictors. 
+
+In general, the models performed with a range accuracy of 64.35% - 77.39% and a number of predictors between 4 and 8.
+
+The data transformation (dealing with extreme values and categorizing data) improved reasonably the performance of some prediction models.
+
+As a tool for doctors diagnosis, we recommend the Logistic Regression model, which showed a good accuracy (73.91% - 77.39%) and a good balance of sensitivity and specificity. By balanced we mean similar levels of performance. Furthermore, this model works well with the original dataframe without any transformation (accuracy = 75,65%). The data transformation can be complex (like the categorization by clustering) and could lead to interpretation difficulties.
